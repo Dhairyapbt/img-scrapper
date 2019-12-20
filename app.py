@@ -1,97 +1,83 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Mon Apr  8 12:55:29 2019
-
-@author: Jiwitesh_Sharma
-"""
-# Importing the necessary Libraries
-from flask_cors import CORS,cross_origin
-from imagescrapperservice.ImageScrapperService import ImageScrapperService
-from imagescrapper.ImageScrapper import ImageScrapper
 from flask import Flask, render_template, request,jsonify
+from flask_cors import CORS,cross_origin
+import requests
+from bs4 import BeautifulSoup as bs
+from urllib.request import urlopen as uReq
 
+app = Flask(__name__)
 
-# import request
-app = Flask(__name__) # initialising the flask app with the name 'app'
-
-#response = 'Welcome!'
-
-
-@app.route('/')  # route for redirecting to the home page
+@app.route('/',methods=['GET'])  # route to display the home page
 @cross_origin()
-def home():
-    return render_template('index.html')
+def homePage():
+    return render_template("index.html")
 
-@app.route('/showImages') # route to show the images on a webpage
+@app.route('/review',methods=['POST','GET']) # route to show the review comments in a web UI
 @cross_origin()
-def show_images():
-    scraper_object=ImageScrapper() #Instantiating the object of class ImageScrapper
-    list_of_jpg_files=scraper_object.list_only_jpg_files('static') # obtaining the list of image files from the static folder
-    print(list_of_jpg_files)
-    try:
-        if(len(list_of_jpg_files)>0): # if there are images present, show them on a wen UI
-            return render_template('showImage.html',user_images = list_of_jpg_files)
-        else:
-            return "Please try with a different string" # show this error message if no images are present in the static folder
-    except Exception as e:
-        print('no Images found ', e)
-        return "Please try with a different string"
-
-@app.route('/searchImages', methods=['GET','POST'])
-def searchImages():
+def index():
     if request.method == 'POST':
-        print("entered post")
-        keyWord = request.form['keyword'] # assigning the value of the input keyword to the variable keyword
+        try:
+            searchString = request.form['content'].replace(" ","")
+            flipkart_url = "https://www.flipkart.com/search?q=" + searchString
+            uClient = uReq(flipkart_url)
+            flipkartPage = uClient.read()
+            uClient.close()
+            flipkart_html = bs(flipkartPage, "html.parser")
+            bigboxes = flipkart_html.findAll("div", {"class": "bhgxx2 col-12-12"})
+            del bigboxes[0:3]
+            box = bigboxes[0]
+            productLink = "https://www.flipkart.com" + box.div.div.div.a['href']
+            prodRes = requests.get(productLink)
+            prodRes.encoding='utf-8'
+            prod_html = bs(prodRes.text, "html.parser")
+            print(prod_html)
+            commentboxes = prod_html.find_all('div', {'class': "_3nrCtb"})
+
+            filename = searchString + ".csv"
+            fw = open(filename, "w")
+            headers = "Product, Customer Name, Rating, Heading, Comment \n"
+            fw.write(headers)
+            reviews = []
+            for commentbox in commentboxes:
+                try:
+                    #name.encode(encoding='utf-8')
+                    name = commentbox.div.div.find_all('p', {'class': '_3LYOAd _3sxSiS'})[0].text
+
+                except:
+                    name = 'No Name'
+
+                try:
+                    #rating.encode(encoding='utf-8')
+                    rating = commentbox.div.div.div.div.text
+
+
+                except:
+                    rating = 'No Rating'
+
+                try:
+                    #commentHead.encode(encoding='utf-8')
+                    commentHead = commentbox.div.div.div.p.text
+
+                except:
+                    commentHead = 'No Comment Heading'
+                try:
+                    comtag = commentbox.div.div.find_all('div', {'class': ''})
+                    #custComment.encode(encoding='utf-8')
+                    custComment = comtag[0].div.text
+                except Exception as e:
+                    print("Exception while creating dictionary: ",e)
+
+                mydict = {"Product": searchString, "Name": name, "Rating": rating, "CommentHead": commentHead,
+                          "Comment": custComment}
+                reviews.append(mydict)
+            return render_template('results.html', reviews=reviews[0:(len(reviews)-1)])
+        except Exception as e:
+            print('The Exception message is: ',e)
+            return 'something is wrong'
+        return render_template('results.html')
 
     else:
-        print("did not enter post")
-    print('printing = ' + keyWord)
+        return render_template('index.html')
 
-    scraper_object = ImageScrapper() # instantiating the class
-    list_of_jpg_files = scraper_object.list_only_jpg_files('static') # obtaining the list of image files from the static folder
-    scraper_object.delete_existing_image(list_of_jpg_files) # deleting the old image files stored from the previous search
-    # splitting and combining the keyword for a string containing multiple words
-    image_name = keyWord.split()
-    image_name = '+'.join(image_name)
-    # adding the header metadata
-    header = {
-        'User-Agent': "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/43.0.2357.134 Safari/537.36"}
-
-    service = ImageScrapperService  # instantiating the object of class ImageScrapperService
-    # (imageURLList, header, keyWord, fileLoc)
-    masterListOfImages = service.downloadImages(keyWord, header) # getting the master list from keyword
-    imageList = masterListOfImages[0] # extracting the list of images from the master list
-    imageTypeList = masterListOfImages[1] # extracting the list of type of images from the masterlist
-
-    response = "We have downloaded ", len(imageList), "images of " + image_name + " for you"
-
-    return show_images() # redirect the control to the show images method
-
-@app.route('/api/showImages', methods=['GET','POST']) # route to return the list of file locations for API calls
-@cross_origin()
-def get_image_url():
-    if request.method == 'POST':
-        print("entered post")
-        keyWord =  request.json['keyword'] # assigning the value of the input keyword to the variable keyword
-
-    else:
-        print("Did not enter  post")
-    print('printing = ' + keyWord)
-    # splitting and combining the keyword for a string containing multiple words
-    image_name = keyWord.split()
-    image_name = '+'.join(image_name)
-    # adding the header metadata
-    header = {
-        'User-Agent': "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/43.0.2357.134 Safari/537.36"}
-
-    service = ImageScrapperService # instantiating the object of class ImageScrapperService
-    url_enum = service.get_image_urls(keyWord, header) # getting the URL enumeration
-    url_list=[] # initializing and empty url list
-    for i, (img, Type) in enumerate(url_enum[0:5]):
-        # creating key value pairs of image URLs to be sent as json
-        dict={'image_url':img}
-        url_list.append(dict)
-    return jsonify(url_list) # send the url list in JSON format
 if __name__ == "__main__":
-    #app.run(host='127.0.0.1', port=8000) # port to run on local machine
-    app.run(debug=True) # to run on cloud
+    #app.run(host='127.0.0.1', port=8001, debug=True)
+    app.run(debug=True)
